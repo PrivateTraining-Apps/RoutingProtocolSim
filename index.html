@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Routing Protocol Simulation</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React and ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .no-select { user-select: none; -webkit-user-select: none; }
+        
+        /* Custom scrollbar for the table */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1; 
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; 
+        }
+        
+        /* Ensure html and body take up full height for the app to fill */
+        html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 w-full h-full">
+
+    <div id="root" class="w-full h-full"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- Icons (Inline SVGs) ---
+        
+        const IconPlay = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        );
+
+        const IconRotateCcw = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>
+        );
+
+        const IconShare2 = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+        );
+
+        const IconInfo = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        );
+
+        const IconServer = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+        );
+
+        // --- Data & Configuration ---
+
+        const INITIAL_ROUTERS = [
+            {
+                id: 'R1',
+                name: 'Router 1',
+                x: 150,
+                y: 80, 
+                interfaces: [
+                    { id: 'if1', ip: '192.168.1.1', mask: '255.255.255.0', subnet: '192.168.1.0', name: 'Fa0/0' },
+                    { id: 'if2', ip: '10.0.0.1', mask: '255.255.255.252', subnet: '10.0.0.0', name: 'Se0/0/0' },
+                ],
+                routingTable: [],
+            },
+            {
+                id: 'R2',
+                name: 'Router 2',
+                x: 450,
+                y: 80,
+                interfaces: [
+                    { id: 'if1', ip: '10.0.0.2', mask: '255.255.255.252', subnet: '10.0.0.0', name: 'Se0/0/0' },
+                    { id: 'if2', ip: '10.0.0.5', mask: '255.255.255.252', subnet: '10.0.0.4', name: 'Se0/0/1' },
+                    { id: 'if3', ip: '172.16.1.1', mask: '255.255.255.0', subnet: '172.16.1.0', name: 'Fa0/0' },
+                ],
+                routingTable: [],
+            },
+            {
+                id: 'R3',
+                name: 'Router 3',
+                x: 300,
+                y: 260,
+                interfaces: [
+                    { id: 'if1', ip: '10.0.0.6', mask: '255.255.255.252', subnet: '10.0.0.4', name: 'Se0/0/1' },
+                    { id: 'if2', ip: '192.168.2.1', mask: '255.255.255.0', subnet: '192.168.2.0', name: 'Fa0/0' },
+                ],
+                routingTable: [],
+            },
+        ];
+
+        const INITIAL_LINKS = [
+            { id: 'l1', sourceId: 'R1', targetId: 'R2', network: '10.0.0.0/30', cost: 1 },
+            { id: 'l2', sourceId: 'R2', targetId: 'R3', network: '10.0.0.4/30', cost: 1 },
+        ];
+
+        const getRouterById = (routers, id) => routers.find((r) => r.id === id);
+
+        // --- Main Component ---
+
+        function RoutingSimulation() {
+            const [routers, setRouters] = useState(INITIAL_ROUTERS);
+            const [packets, setPackets] = useState([]);
+            const [selectedRouterId, setSelectedRouterId] = useState('R1');
+            const [step, setStep] = useState(0);
+            const [isAnimating, setIsAnimating] = useState(false);
+            const animationRef = useRef();
+            
+            // Kept for internal logic if we want to expand logging later
+            const [logs, setLogs] = useState(['System initialised.']);
+
+            // --- Initialisation Effect ---
+            useEffect(() => {
+                resetSimulation();
+            }, []);
+
+            const addLog = (msg) => {
+                setLogs((prev) => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev.slice(0, 4)]);
+            };
+
+            const resetSimulation = () => {
+                setStep(0);
+                setPackets([]);
+                setIsAnimating(false);
+                
+                const resetRouters = INITIAL_ROUTERS.map(r => {
+                    const connectedRoutes = r.interfaces.map(int => ({
+                        destination: int.subnet,
+                        mask: int.mask,
+                        gateway: '0.0.0.0', 
+                        interface: int.name,
+                        metric: 0,
+                        source: 'C'
+                    }));
+                    return { ...r, routingTable: connectedRoutes };
+                });
+                setRouters(resetRouters);
+                addLog('Simulation reset.');
+            };
+
+            // --- Animation Loop ---
+
+            useEffect(() => {
+                if (packets.length === 0) return;
+
+                let lastTime = performance.now();
+
+                const animate = (time) => {
+                    const delta = (time - lastTime) / 1000;
+                    lastTime = time;
+
+                    setPackets((prevPackets) => {
+                        const nextPackets = prevPackets.map((p) => ({
+                            ...p,
+                            progress: p.progress + delta * 0.5, // Speed of packet
+                        }));
+
+                        const activePackets = nextPackets.filter((p) => {
+                            if (p.progress >= 1) {
+                                handlePacketArrival(p);
+                                return false;
+                            }
+                            return true;
+                        });
+
+                        if (activePackets.length === 0) {
+                            setIsAnimating(false);
+                        }
+                        
+                        return activePackets;
+                    });
+
+                    if (packets.length > 0) {
+                        animationRef.current = requestAnimationFrame(animate);
+                    }
+                };
+
+                animationRef.current = requestAnimationFrame(animate);
+                return () => cancelAnimationFrame(animationRef.current);
+            }, [packets.length]);
+
+            // --- Core Logic ---
+
+            const handlePacketArrival = (packet) => {
+                setRouters((currentRouters) => {
+                    const targetRouter = currentRouters.find(r => r.id === packet.targetId);
+                    const sourceRouter = currentRouters.find(r => r.id === packet.sourceId);
+                    
+                    if (!targetRouter || !sourceRouter) return currentRouters;
+
+                    const receivedRoutes = JSON.parse(packet.message);
+                    let updated = false;
+                    const newTable = [...targetRouter.routingTable];
+
+                    receivedRoutes.forEach(route => {
+                        const newMetric = route.metric + 1;
+                        const existingRouteIndex = newTable.findIndex(r => r.destination === route.destination);
+
+                        const link = INITIAL_LINKS.find(l => 
+                            (l.sourceId === targetRouter.id && l.targetId === sourceRouter.id) || 
+                            (l.targetId === targetRouter.id && l.sourceId === sourceRouter.id)
+                        );
+                        
+                        // Interface Determination Logic (Simulated for visual correctness)
+                        let ingressInterfaceName = "Serial?";
+                        if (link) {
+                           const myInterface = targetRouter.interfaces.find(i => i.subnet === link.network.split('/')[0]);
+                           if(myInterface) ingressInterfaceName = myInterface.name;
+                           else {
+                               // Hardcoded fallbacks for the specific topology if subnet matching fails for any reason
+                               if(targetRouter.id === 'R2' && sourceRouter.id === 'R1') ingressInterfaceName = 'Se0/0/0';
+                               if(targetRouter.id === 'R2' && sourceRouter.id === 'R3') ingressInterfaceName = 'Se0/0/1';
+                               if(targetRouter.id === 'R1') ingressInterfaceName = 'Se0/0/0';
+                               if(targetRouter.id === 'R3') ingressInterfaceName = 'Se0/0/1';
+                           }
+                        }
+
+                        let nextHopIp = "0.0.0.0";
+                        if (link) {
+                             const sourceInt = sourceRouter.interfaces.find(i => 
+                                (i.subnet === '10.0.0.0' && link.network.startsWith('10.0.0.0')) ||
+                                (i.subnet === '10.0.0.4' && link.network.startsWith('10.0.0.4'))
+                             );
+                             if (sourceInt) nextHopIp = sourceInt.ip;
+                        }
+
+                        if (existingRouteIndex === -1) {
+                            newTable.push({
+                                destination: route.destination,
+                                mask: route.mask,
+                                gateway: nextHopIp,
+                                interface: ingressInterfaceName,
+                                metric: newMetric,
+                                source: 'R'
+                            });
+                            updated = true;
+                            addLog(`${targetRouter.name} learned ${route.destination}`);
+                        } else {
+                            // Distance Vector Logic: Update if metric is lower, or if the update comes from the current next-hop (not implemented here for simplicity, focusing on cost)
+                            if (newMetric < newTable[existingRouteIndex].metric) {
+                                newTable[existingRouteIndex] = {
+                                    ...newTable[existingRouteIndex],
+                                    metric: newMetric,
+                                    gateway: nextHopIp,
+                                    interface: ingressInterfaceName,
+                                    source: 'R'
+                                };
+                                updated = true;
+                                addLog(`${targetRouter.name} updated ${route.destination}`);
+                            }
+                        }
+                    });
+
+                    if (updated) {
+                        return currentRouters.map(r => r.id === targetRouter.id ? { ...r, routingTable: newTable } : r);
+                    }
+                    return currentRouters;
+                });
+            };
+
+            const startAdvertisementStep = () => {
+                if (isAnimating) return;
+                setIsAnimating(true);
+                setStep(prev => prev + 1);
+
+                const newPackets = [];
+
+                INITIAL_LINKS.forEach(link => {
+                    const r1 = routers.find(r => r.id === link.sourceId);
+                    const r2 = routers.find(r => r.id === link.targetId);
+
+                    if (r1 && r2) {
+                        // Packet from R1 to R2
+                        newPackets.push({
+                            id: `p-${Date.now()}-${r1.id}-${r2.id}`,
+                            sourceId: r1.id,
+                            targetId: r2.id,
+                            progress: 0,
+                            message: JSON.stringify(r1.routingTable),
+                            color: '#3B82F6'
+                        });
+
+                        // Packet from R2 to R1
+                        newPackets.push({
+                            id: `p-${Date.now()}-${r2.id}-${r1.id}`,
+                            sourceId: r2.id,
+                            targetId: r1.id,
+                            progress: 0,
+                            message: JSON.stringify(r2.routingTable),
+                            color: '#3B82F6'
+                        });
+                    }
+                });
+
+                addLog(`Exchange Round ${step + 1} started`);
+                setPackets(newPackets);
+            };
+
+            // --- Render Helpers ---
+
+            const getRouterPosition = (id) => {
+                const r = routers.find((n) => n.id === id);
+                return r ? { x: r.x, y: r.y } : { x: 0, y: 0 };
+            };
+
+            const selectedRouter = routers.find(r => r.id === selectedRouterId);
+
+            return (
+                <div className="flex flex-col h-full w-full bg-slate-50 text-slate-900 font-sans overflow-hidden select-none">
+                    {/* Header */}
+                    <header className="bg-slate-900 text-white p-4 shadow-md flex justify-between items-center z-10 shrink-0">
+                        <div>
+                            <h1 className="text-2xl font-bold flex items-center gap-2">
+                                <IconShare2 className="w-6 h-6 text-blue-400" />
+                                Routing Protocol Simulation
+                            </h1>
+                        </div>
+                        <div className="flex gap-2">
+                            <button 
+                                onClick={resetSimulation}
+                                className="flex items-center gap-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm transition-colors"
+                            >
+                                <IconRotateCcw className="w-3 h-3" /> Reset
+                            </button>
+                            <button 
+                                onClick={startAdvertisementStep}
+                                disabled={isAnimating}
+                                className={`flex items-center gap-2 px-4 py-1 rounded text-sm font-semibold transition-all ${
+                                    isAnimating 
+                                    ? 'bg-slate-600 cursor-not-allowed text-slate-400' 
+                                    : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg hover:shadow-blue-500/25'
+                                }`}
+                            >
+                                <IconPlay className="w-3 h-3 fill-current" /> 
+                                {step === 0 ? "Step 1: Advertise" : "Next Step"}
+                            </button>
+                        </div>
+                    </header>
+
+                    <div className="flex flex-1 overflow-hidden">
+                        
+                        {/* Main Canvas Area */}
+                        <main className="flex-1 relative bg-slate-100 overflow-hidden cursor-default">
+                            
+                            {/* How it works Box */}
+                            <div className="absolute bottom-4 right-4 z-0 bg-white/80 backdrop-blur p-2 rounded shadow-sm border border-slate-200 max-w-xs no-select">
+                                <h3 className="font-semibold text-slate-700 flex items-center gap-2 mb-1 text-sm">
+                                    <IconInfo className="w-3 h-3" /> How it works
+                                </h3>
+                                <p className="text-xs text-slate-600 leading-tight">
+                                    1. <strong>Directly Connected:</strong> Routers start knowing only local interfaces.
+                                    <br/>
+                                    2. <strong>Advertise:</strong> Click "Step" to exchange routing tables.
+                                    <br/>
+                                    3. <strong>Convergence:</strong> Keep stepping until tables stabilise.
+                                </p>
+                            </div>
+
+                            <svg className="w-full h-full pointer-events-none">
+                                <defs>
+                                    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="28" refY="3.5" orient="auto">
+                                        <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+                                    </marker>
+                                </defs>
+
+                                {/* Links */}
+                                {INITIAL_LINKS.map(link => {
+                                    const start = getRouterPosition(link.sourceId);
+                                    const end = getRouterPosition(link.targetId);
+                                    
+                                    // Offset logic: Move the specific label for 10.0.0.4 to avoid overlapping the diagonal link
+                                    const isDiagonal = link.network.includes('10.0.0.4');
+                                    const labelX = (start.x + end.x) / 2 + (isDiagonal ? 25 : 0);
+                                    const labelY = (start.y + end.y) / 2 + (isDiagonal ? -5 : -10);
+
+                                    return (
+                                        <g key={link.id}>
+                                            <line 
+                                                x1={start.x} y1={start.y} 
+                                                x2={end.x} y2={end.y} 
+                                                stroke="#94a3b8" 
+                                                strokeWidth="4" 
+                                            />
+                                            <text 
+                                                x={labelX} 
+                                                y={labelY} 
+                                                textAnchor="middle" 
+                                                className="fill-slate-500 text-xs font-mono bg-white"
+                                            >
+                                                {link.network}
+                                            </text>
+                                        </g>
+                                    );
+                                })}
+
+                                {/* Visual Clouds (Subnets) */}
+                                <g transform="translate(150, 140)"> {/* R1 area */}
+                                    <line x1="0" y1="-60" x2="0" y2="-20" stroke="#cbd5e1" strokeWidth="2" strokeDasharray="4" />
+                                    <ellipse cx="0" cy="0" rx="40" ry="25" fill="#e2e8f0" />
+                                    <text x="0" y="5" textAnchor="middle" className="text-xs fill-slate-500">192.168.1.0/24</text>
+                                </g>
+                                <g transform="translate(450, 20)"> {/* R2 area */}
+                                    <line x1="0" y1="60" x2="0" y2="20" stroke="#cbd5e1" strokeWidth="2" strokeDasharray="4" />
+                                    <ellipse cx="0" cy="0" rx="40" ry="25" fill="#e2e8f0" />
+                                    <text x="0" y="5" textAnchor="middle" className="text-xs fill-slate-500">172.16.1.0/24</text>
+                                </g>
+                                <g transform="translate(300, 320)"> {/* R3 area */}
+                                    <line x1="0" y1="-60" x2="0" y2="-20" stroke="#cbd5e1" strokeWidth="2" strokeDasharray="4" />
+                                    <ellipse cx="0" cy="0" rx="40" ry="25" fill="#e2e8f0" />
+                                    <text x="0" y="5" textAnchor="middle" className="text-xs fill-slate-500">192.168.2.0/24</text>
+                                </g>
+
+                                {/* Packets */}
+                                {packets.map(p => {
+                                    const start = getRouterPosition(p.sourceId);
+                                    const end = getRouterPosition(p.targetId);
+                                    const currentX = start.x + (end.x - start.x) * p.progress;
+                                    const currentY = start.y + (end.y - start.y) * p.progress;
+
+                                    return (
+                                        <g key={p.id}>
+                                            <circle cx={currentX} cy={currentY} r="6" fill={p.color} className="animate-pulse shadow-lg" />
+                                        </g>
+                                    );
+                                })}
+                            </svg>
+
+                            {/* Router Nodes */}
+                            {routers.map(router => (
+                                <div 
+                                    key={router.id}
+                                    onClick={() => setSelectedRouterId(router.id)}
+                                    className={`absolute w-14 h-14 rounded-full flex items-center justify-center transform -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-all duration-300 pointer-events-auto border-4 ${selectedRouterId === router.id ? 'border-blue-500 shadow-xl scale-110 bg-white' : 'border-slate-300 bg-slate-100 hover:border-blue-300'}`}
+                                    style={{ left: router.x, top: router.y }}
+                                >
+                                    <div className="flex flex-col items-center pointer-events-none">
+                                        <IconServer className={`w-5 h-5 ${selectedRouterId === router.id ? 'text-blue-600' : 'text-slate-500'}`} />
+                                        <span className="text-xs font-bold mt-1 text-slate-700">{router.id}</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </main>
+
+                        {/* Sidebar */}
+                        <aside className="w-80 bg-white border-l border-slate-200 flex flex-col shadow-lg z-20">
+                            {/* Router Details */}
+                            <div className="p-3 border-b border-slate-100 bg-slate-50">
+                                <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                                    <IconServer className="w-4 h-4 text-blue-600" />
+                                    {selectedRouter?.name}
+                                </h2>
+                                <div className="mt-2 text-xs text-slate-500 space-y-1">
+                                    {selectedRouter?.interfaces.map(int => (
+                                        <div key={int.id} className="flex justify-between font-mono bg-white px-2 py-1 rounded border border-slate-200">
+                                            <span>{int.name}</span>
+                                            <span className="text-slate-700">{int.ip}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Routing Table */}
+                            <div className="flex-1 overflow-hidden flex flex-col">
+                                <div className="p-2 bg-slate-100 border-b border-slate-200 flex justify-between items-center">
+                                    <h3 className="font-semibold text-slate-700 text-sm">Routing Table</h3>
+                                    <span className="text-xs uppercase font-bold tracking-wider text-slate-400 bg-slate-200 px-2 py-0.5 rounded">IPv4</span>
+                                </div>
+                                
+                                <div className="overflow-auto flex-1 p-0">
+                                    <table className="w-full text-left text-xs border-collapse">
+                                        <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200 sticky top-0">
+                                            <tr>
+                                                <th className="p-2">Code</th>
+                                                <th className="p-2">Network</th>
+                                                <th className="p-2">Next Hop</th>
+                                                <th className="p-2">Metric</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="font-mono text-slate-700">
+                                            {selectedRouter?.routingTable.sort((a,b) => a.destination.localeCompare(b.destination)).map((route, i) => (
+                                                <tr key={i} className="border-b border-slate-100 hover:bg-blue-50 transition-colors">
+                                                    <td className="p-2">
+                                                        <span className={`inline-block w-4 h-4 text-center rounded text-[10px] leading-4 font-bold ${route.source === 'C' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                                                            {route.source}
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-2 font-semibold">{route.destination}</td>
+                                                    <td className="p-2 text-slate-500">{route.gateway === '0.0.0.0' ? 'Direct' : route.gateway}</td>
+                                                    <td className="p-2 text-center text-slate-400">{route.metric}</td>
+                                                </tr>
+                                            ))}
+                                            {selectedRouter?.routingTable.length === 0 && (
+                                                <tr>
+                                                    <td colSpan={4} className="p-4 text-center text-slate-400 italic">No routes present</td>
+                                                </tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </aside>
+
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<RoutingSimulation />);
+    </script>
+</body>
+</html>
