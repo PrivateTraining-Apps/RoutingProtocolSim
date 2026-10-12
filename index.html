@@ -11,29 +11,22 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    
+
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         .no-select { user-select: none; -webkit-user-select: none; }
-        
+
         /* Custom scrollbar for the table */
-        ::-webkit-scrollbar {
-            width: 6px;
-            height: 6px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #f1f5f9; 
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #cbd5e1; 
-            border-radius: 3px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #94a3b8; 
-        }
-        
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
         /* Ensure html and body take up full height for the app to fill */
         html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+
+        .router-hover:hover .router-ring { stroke: #93c5fd; }
+        .halo { paint-order: stroke; stroke: #f1f5f9; stroke-width: 4px; stroke-linejoin: round; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-900 w-full h-full">
@@ -44,281 +37,397 @@
         const { useState, useEffect, useRef } = React;
 
         // --- Icons (Inline SVGs) ---
-        
+
         const IconPlay = ({ className }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="5 3 19 12 5 21 5 3"/></svg>
         );
-
         const IconRotateCcw = ({ className }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>
         );
-
         const IconShare2 = ({ className }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
         );
-
         const IconInfo = ({ className }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
         );
-
         const IconServer = ({ className }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
         );
 
+        // --- IPv4 helpers ---
+
+        const ipToInt = (ip) => ip.split('.').reduce((acc, o) => acc * 256 + Number(o), 0);
+        const intToIp = (n) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.');
+        const maskToPrefix = (mask) => ipToInt(mask).toString(2).split('').filter(c => c === '1').length;
+        const prefixToMaskInt = (p) => (p === 0 ? 0 : (0xFFFFFFFF << (32 - p)) >>> 0);
+        const networkOf = (ip, prefix) => intToIp((ipToInt(ip) & prefixToMaskInt(prefix)) >>> 0);
+        const classfulPrefix = (ip) => {
+            const first = Number(ip.split('.')[0]);
+            return first < 128 ? 8 : first < 192 ? 16 : 24;
+        };
+        const lastOctet = (ip) => ip.split('.')[3];
+        const fullIfName = (n) => n.replace(/^Fa/, 'FastEthernet').replace(/^Se/, 'Serial').replace(/^Gi/, 'GigabitEthernet');
+
         // --- Data & Configuration ---
 
-        const INITIAL_ROUTERS = [
+        const ROUTER_DEFS = [
             {
-                id: 'R1',
-                name: 'Router 1',
-                x: 150,
-                y: 80, 
+                id: 'R1', name: 'Router 1', x: 160, y: 170,
                 interfaces: [
-                    { id: 'if1', ip: '192.168.1.1', mask: '255.255.255.0', subnet: '192.168.1.0', name: 'Fa0/0' },
-                    { id: 'if2', ip: '10.0.0.1', mask: '255.255.255.252', subnet: '10.0.0.0', name: 'Se0/0/0' },
+                    { id: 'if1', name: 'Fa0/0', ip: '192.168.1.1', mask: '255.255.255.0', role: 'LAN' },
+                    { id: 'if2', name: 'Se0/0/0', ip: '10.0.0.1', mask: '255.255.255.252', role: 'WAN' },
                 ],
-                routingTable: [],
             },
             {
-                id: 'R2',
-                name: 'Router 2',
-                x: 450,
-                y: 80,
+                id: 'R2', name: 'Router 2', x: 520, y: 170,
                 interfaces: [
-                    { id: 'if1', ip: '10.0.0.2', mask: '255.255.255.252', subnet: '10.0.0.0', name: 'Se0/0/0' },
-                    { id: 'if2', ip: '10.0.0.5', mask: '255.255.255.252', subnet: '10.0.0.4', name: 'Se0/0/1' },
-                    { id: 'if3', ip: '172.16.1.1', mask: '255.255.255.0', subnet: '172.16.1.0', name: 'Fa0/0' },
+                    { id: 'if1', name: 'Se0/0/0', ip: '10.0.0.2', mask: '255.255.255.252', role: 'WAN' },
+                    { id: 'if2', name: 'Se0/0/1', ip: '10.0.0.5', mask: '255.255.255.252', role: 'WAN' },
+                    { id: 'if3', name: 'Fa0/0', ip: '172.16.1.1', mask: '255.255.255.0', role: 'LAN' },
                 ],
-                routingTable: [],
             },
             {
-                id: 'R3',
-                name: 'Router 3',
-                x: 300,
-                y: 260,
+                id: 'R3', name: 'Router 3', x: 360, y: 320,
                 interfaces: [
-                    { id: 'if1', ip: '10.0.0.6', mask: '255.255.255.252', subnet: '10.0.0.4', name: 'Se0/0/1' },
-                    { id: 'if2', ip: '192.168.2.1', mask: '255.255.255.0', subnet: '192.168.2.0', name: 'Fa0/0' },
+                    { id: 'if1', name: 'Se0/0/1', ip: '10.0.0.6', mask: '255.255.255.252', role: 'WAN' },
+                    { id: 'if2', name: 'Fa0/0', ip: '192.168.2.1', mask: '255.255.255.0', role: 'LAN' },
                 ],
-                routingTable: [],
             },
         ];
 
-        const INITIAL_LINKS = [
-            { id: 'l1', sourceId: 'R1', targetId: 'R2', network: '10.0.0.0/30', cost: 1 },
-            { id: 'l2', sourceId: 'R2', targetId: 'R3', network: '10.0.0.4/30', cost: 1 },
+        // Point to point serial links. The network is derived from the interface addressing.
+        const LINKS = [
+            { id: 'l1', a: 'R1', aIf: 'Se0/0/0', b: 'R2', bIf: 'Se0/0/0' },
+            { id: 'l2', a: 'R2', aIf: 'Se0/0/1', b: 'R3', bIf: 'Se0/0/1' },
         ];
+
+        // LAN segments drawn as bus networks hanging off each router's FastEthernet interface.
+        const LANS = [
+            { id: 'lan1', router: 'R1', iface: 'Fa0/0', busY: 275, side: 'below', labelSide: 'right' },
+            { id: 'lan2', router: 'R2', iface: 'Fa0/0', busY: 70,  side: 'above', labelSide: 'left' },
+            { id: 'lan3', router: 'R3', iface: 'Fa0/0', busY: 420, side: 'below', labelSide: 'right' },
+        ];
+
+        const RIP_AD = 120;
+        const RIP_INFINITY = 16;
 
         const getRouterById = (routers, id) => routers.find((r) => r.id === id);
+        const getIface = (router, name) => router.interfaces.find((i) => i.name === name);
+        const routeKey = (r) => `${r.network}/${r.prefix}`;
+
+        const sortRoutes = (table) =>
+            [...table].sort((a, b) => ipToInt(a.network) - ipToInt(b.network) || a.prefix - b.prefix);
+
+        // Each interface gives a connected (C) route for its subnet and a local (L) /32 host route.
+        const connectedRoutes = (router) =>
+            router.interfaces.flatMap((int) => {
+                const prefix = maskToPrefix(int.mask);
+                return [
+                    { code: 'C', network: networkOf(int.ip, prefix), prefix, iface: int.name, ad: 0, metric: 0, nextHop: null },
+                    { code: 'L', network: int.ip, prefix: 32, iface: int.name, ad: 0, metric: 0, nextHop: null },
+                ];
+            });
+
+        const buildInitialRouters = () =>
+            ROUTER_DEFS.map((r) => ({ ...r, routingTable: sortRoutes(connectedRoutes(r)) }));
+
+        // RIPv2 update sent out an interface: connected and RIP routes (local /32s are not advertised),
+        // applying split horizon so routes are never sent back out the interface they were learned on.
+        const buildAdvert = (router, ifaceName) =>
+            router.routingTable
+                .filter((r) => r.code === 'C' || (r.code === 'R' && r.iface !== ifaceName))
+                .map((r) => ({ network: r.network, prefix: r.prefix, metric: r.code === 'C' ? 0 : r.metric }));
+
+        // One synchronous exchange round: every router advertises the table it held at the start of the round.
+        const computeRound = (routers) => {
+            const inbox = {};
+            routers.forEach((r) => (inbox[r.id] = []));
+            const packets = [];
+
+            LINKS.forEach((link) => {
+                [
+                    [link.a, link.aIf, link.b, link.bIf, 1],
+                    [link.b, link.bIf, link.a, link.aIf, -1],
+                ].forEach(([src, srcIf, dst, dstIf, dir]) => {
+                    const sr = getRouterById(routers, src);
+                    const routes = buildAdvert(sr, srcIf);
+                    inbox[dst].push({ from: src, senderIp: getIface(sr, srcIf).ip, iface: dstIf, routes });
+                    packets.push({ id: `${link.id}-${src}-${dst}`, linkId: link.id, dir, sourceId: src, targetId: dst, count: routes.length });
+                });
+            });
+
+            const changes = {};
+            const log = [];
+            let total = 0;
+
+            const next = routers.map((r) => {
+                const table = r.routingTable.map((x) => ({ ...x }));
+                const changed = [];
+
+                inbox[r.id].forEach((msg) => {
+                    msg.routes.forEach((adv) => {
+                        const metric = Math.min(adv.metric + 1, RIP_INFINITY);
+                        const key = routeKey(adv);
+                        const idx = table.findIndex((t) => t.network === adv.network && t.prefix === adv.prefix);
+
+                        if (idx === -1) {
+                            if (metric >= RIP_INFINITY) return;
+                            table.push({ code: 'R', network: adv.network, prefix: adv.prefix, ad: RIP_AD, metric, nextHop: msg.senderIp, iface: msg.iface });
+                            changed.push(key);
+                            log.push(`${r.id} learned ${key} via ${msg.senderIp} (metric ${metric})`);
+                            return;
+                        }
+
+                        const ex = table[idx];
+                        // Connected routes (AD 0) always beat RIP (AD 120).
+                        if (ex.code !== 'R') return;
+
+                        if (ex.nextHop === msg.senderIp) {
+                            // Update from the current next hop is always trusted, better or worse.
+                            if (ex.metric !== metric) {
+                                table[idx] = { ...ex, metric };
+                                changed.push(key);
+                                log.push(`${r.id} updated ${key} metric to ${metric}`);
+                            }
+                        } else if (metric < ex.metric) {
+                            table[idx] = { ...ex, metric, nextHop: msg.senderIp, iface: msg.iface };
+                            changed.push(key);
+                            log.push(`${r.id} found a better path to ${key} via ${msg.senderIp}`);
+                        }
+                    });
+                });
+
+                changes[r.id] = changed;
+                total += changed.length;
+                return { ...r, routingTable: sortRoutes(table) };
+            });
+
+            return { next, packets, changes, total, log };
+        };
+
+        // Cisco IOS style "show ip route" output.
+        const formatRouteLine = (r, pad) => {
+            const dest = `${r.network}/${r.prefix}`;
+            const body = r.code === 'R'
+                ? `${dest} [${r.ad}/${r.metric}] via ${r.nextHop}, ${fullIfName(r.iface)}`
+                : `${dest} is directly connected, ${fullIfName(r.iface)}`;
+            return r.code.padEnd(pad) + body;
+        };
+
+        const showIpRoute = (router) => {
+            const lines = [
+                `${router.id}#show ip route`,
+                'Codes: L - local, C - connected, S - static, R - RIP',
+                '',
+                'Gateway of last resort is not set',
+                '',
+            ];
+            const groups = [];
+            sortRoutes(router.routingTable).forEach((r) => {
+                const cp = classfulPrefix(r.network);
+                const cn = networkOf(r.network, cp);
+                let g = groups.find((x) => x.net === cn);
+                if (!g) { g = { net: cn, cp, routes: [] }; groups.push(g); }
+                g.routes.push(r);
+            });
+            groups.forEach((g) => {
+                const masks = [...new Set(g.routes.map((r) => r.prefix))];
+                if (g.routes.length === 1 && g.routes[0].prefix === g.cp) {
+                    lines.push(formatRouteLine(g.routes[0], 6));
+                    return;
+                }
+                if (masks.length > 1) {
+                    lines.push(`      ${g.net}/${g.cp} is variably subnetted, ${g.routes.length} subnets, ${masks.length} masks`);
+                } else {
+                    lines.push(`      ${g.net}/${masks[0]} is subnetted, ${g.routes.length} subnets`);
+                }
+                g.routes.forEach((r) => lines.push(formatRouteLine(r, 9)));
+            });
+            return lines.join('\n');
+        };
+
+        // --- Diagram pieces ---
+
+        function LanBus({ lan, router }) {
+            const int = getIface(router, lan.iface);
+            const prefix = maskToPrefix(int.mask);
+            const net = networkOf(int.ip, prefix);
+            const base = ipToInt(net);
+
+            const cx = router.x;
+            const by = lan.busY;
+            const half = 62;
+            const x1 = cx - half;
+            const x2 = cx + half;
+            const dir = lan.side === 'below' ? 1 : -1; // direction the hosts hang from the bus
+            const dropStart = lan.side === 'below' ? router.y + 30 : router.y - 30;
+            const hostOffsets = [-40, 0, 40];
+
+            const boxW = 104;
+            const boxX = lan.labelSide === 'right' ? x2 + 12 : x1 - 12 - boxW;
+
+            return (
+                <g>
+                    {/* Router to bus drop cable */}
+                    <line x1={cx} y1={dropStart} x2={cx} y2={by} stroke="#64748b" strokeWidth="2" />
+                    <text x={cx + 6} y={(dropStart + by) / 2 + 3} className="halo" fontSize="10" fontFamily="monospace" fill="#475569">
+                        {lan.iface} .{lastOctet(int.ip)}
+                    </text>
+
+                    {/* Bus backbone with terminators */}
+                    <line x1={x1} y1={by} x2={x2} y2={by} stroke="#334155" strokeWidth="5" />
+                    <rect x={x1 - 5} y={by - 7} width="5" height="14" rx="1" fill="#334155" />
+                    <rect x={x2} y={by - 7} width="5" height="14" rx="1" fill="#334155" />
+
+                    {/* Hosts */}
+                    {hostOffsets.map((o, i) => {
+                        const hx = cx + o;
+                        const hy = by + dir * 20;
+                        const monY = dir === 1 ? hy : hy - 16;
+                        const hostIp = intToIp(base + 10 + i);
+                        return (
+                            <g key={i}>
+                                <line x1={hx} y1={by} x2={hx} y2={hy} stroke="#64748b" strokeWidth="1.5" />
+                                <rect x={hx - 9} y={monY} width="18" height="12" rx="2" fill="#ffffff" stroke="#475569" strokeWidth="1.5" />
+                                <line x1={hx} y1={monY + 12} x2={hx} y2={monY + 15} stroke="#475569" strokeWidth="1.5" />
+                                <line x1={hx - 5} y1={monY + 15.5} x2={hx + 5} y2={monY + 15.5} stroke="#475569" strokeWidth="1.5" />
+                                <text x={hx + 12} y={monY + 9} fontSize="9" fontFamily="monospace" fill="#64748b">.{lastOctet(hostIp)}</text>
+                            </g>
+                        );
+                    })}
+
+                    {/* Network label */}
+                    <g>
+                        <rect x={boxX} y={by - 20} width={boxW} height="40" rx="6" fill="#ffffff" stroke="#cbd5e1" />
+                        <text x={boxX + 8} y={by - 5} fontSize="11" fontFamily="monospace" fontWeight="700" fill="#334155">{net}/{prefix}</text>
+                        <text x={boxX + 8} y={by + 10} fontSize="9" fontFamily="monospace" fill="#64748b">{int.mask}</text>                    </g>
+                </g>
+            );
+        }
 
         // --- Main Component ---
 
         function RoutingSimulation() {
-            const [routers, setRouters] = useState(INITIAL_ROUTERS);
+            const [routers, setRouters] = useState(buildInitialRouters);
             const [packets, setPackets] = useState([]);
+            const [progress, setProgress] = useState(0);
             const [selectedRouterId, setSelectedRouterId] = useState('R1');
             const [step, setStep] = useState(0);
             const [isAnimating, setIsAnimating] = useState(false);
-            const animationRef = useRef();
-            
-            // Kept for internal logic if we want to expand logging later
+            const [recent, setRecent] = useState({});
+            const [view, setView] = useState('table');
+            const [status, setStatus] = useState({ text: 'Routers know only their directly connected and local routes.', converged: false });
             const [logs, setLogs] = useState(['System initialised.']);
+            const pendingRef = useRef(null);
 
-            // --- Initialisation Effect ---
-            useEffect(() => {
-                resetSimulation();
-            }, []);
+            // --- Zoom and pan for the topology ---
+            const VIEW_W = 680, VIEW_H = 480;
+            const ZOOM_MIN = 0.8, ZOOM_MAX = 2.5, ZOOM_STEP = 0.1;
+            const [zoom, setZoom] = useState(1);
+            const [pan, setPan] = useState({ x: 0, y: 0 });
+            const svgRef = useRef(null);
+            const dragRef = useRef(null);
 
-            const addLog = (msg) => {
-                setLogs((prev) => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev.slice(0, 4)]);
+            const changeZoom = (delta) =>
+                setZoom((z) => Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z + delta)) * 10) / 10);
+            const resetZoom = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
+
+            const vbW = VIEW_W / zoom, vbH = VIEW_H / zoom;
+            const viewBox = `${(VIEW_W - vbW) / 2 + pan.x} ${(VIEW_H - vbH) / 2 + pan.y} ${vbW} ${vbH}`;
+
+            const onPanStart = (e) => {
+                dragRef.current = { x: e.clientX, y: e.clientY, pan, moved: false };
+            };
+            const onPanMove = (e) => {
+                const d = dragRef.current;
+                if (!d || !svgRef.current) return;
+                const rect = svgRef.current.getBoundingClientRect();
+                const unitsPerPx = Math.max(vbW / rect.width, vbH / rect.height);
+                const dx = e.clientX - d.x, dy = e.clientY - d.y;
+                if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true;
+                setPan({ x: d.pan.x - dx * unitsPerPx, y: d.pan.y - dy * unitsPerPx });
+            };
+            const justDraggedRef = useRef(false);
+            const onPanEnd = () => {
+                justDraggedRef.current = !!(dragRef.current && dragRef.current.moved);
+                dragRef.current = null;
+            };
+            const selectRouter = (id) => {
+                if (justDraggedRef.current) { justDraggedRef.current = false; return; }
+                setSelectedRouterId(id);
+            };
+
+            const addLogs = (msgs) => {
+                const stamp = new Date().toLocaleTimeString('en-AU');
+                setLogs((prev) => [...msgs.map((m) => `[${stamp}] ${m}`), ...prev].slice(0, 30));
             };
 
             const resetSimulation = () => {
+                pendingRef.current = null;
+                setIsAnimating(false);
+                setPackets([]);
+                setProgress(0);
                 setStep(0);
+                setRecent({});
+                setRouters(buildInitialRouters());
+                setStatus({ text: 'Routers know only their directly connected and local routes.', converged: false });
+                addLogs(['Simulation reset.']);
+            };
+
+            const finishRound = () => {
+                const res = pendingRef.current;
+                if (res) {
+                    setRouters(res.next);
+                    setRecent(res.changes);
+                    if (res.total === 0) {
+                        setStatus({ text: `Round ${res.round}: no routing table changed. The network has converged.`, converged: true });
+                        addLogs([`Round ${res.round}: converged.`]);
+                    } else {
+                        setStatus({ text: `Round ${res.round}: ${res.total} route${res.total === 1 ? '' : 's'} added or updated (highlighted).`, converged: false });
+                        addLogs(res.log);
+                    }
+                }
+                pendingRef.current = null;
                 setPackets([]);
                 setIsAnimating(false);
-                
-                const resetRouters = INITIAL_ROUTERS.map(r => {
-                    const connectedRoutes = r.interfaces.map(int => ({
-                        destination: int.subnet,
-                        mask: int.mask,
-                        gateway: '0.0.0.0', 
-                        interface: int.name,
-                        metric: 0,
-                        source: 'C'
-                    }));
-                    return { ...r, routingTable: connectedRoutes };
-                });
-                setRouters(resetRouters);
-                addLog('Simulation reset.');
             };
 
             // --- Animation Loop ---
-
             useEffect(() => {
-                if (packets.length === 0) return;
-
-                let lastTime = performance.now();
-
-                const animate = (time) => {
-                    const delta = (time - lastTime) / 1000;
-                    lastTime = time;
-
-                    setPackets((prevPackets) => {
-                        const nextPackets = prevPackets.map((p) => ({
-                            ...p,
-                            progress: p.progress + delta * 0.5, // Speed of packet
-                        }));
-
-                        const activePackets = nextPackets.filter((p) => {
-                            if (p.progress >= 1) {
-                                handlePacketArrival(p);
-                                return false;
-                            }
-                            return true;
-                        });
-
-                        if (activePackets.length === 0) {
-                            setIsAnimating(false);
-                        }
-                        
-                        return activePackets;
-                    });
-
-                    if (packets.length > 0) {
-                        animationRef.current = requestAnimationFrame(animate);
-                    }
+                if (!isAnimating) return;
+                const start = performance.now();
+                const duration = 1800;
+                let raf;
+                const tick = (t) => {
+                    const p = Math.min(1, (t - start) / duration);
+                    setProgress(p);
+                    if (p < 1) raf = requestAnimationFrame(tick);
+                    else finishRound();
                 };
-
-                animationRef.current = requestAnimationFrame(animate);
-                return () => cancelAnimationFrame(animationRef.current);
-            }, [packets.length]);
-
-            // --- Core Logic ---
-
-            const handlePacketArrival = (packet) => {
-                setRouters((currentRouters) => {
-                    const targetRouter = currentRouters.find(r => r.id === packet.targetId);
-                    const sourceRouter = currentRouters.find(r => r.id === packet.sourceId);
-                    
-                    if (!targetRouter || !sourceRouter) return currentRouters;
-
-                    const receivedRoutes = JSON.parse(packet.message);
-                    let updated = false;
-                    const newTable = [...targetRouter.routingTable];
-
-                    receivedRoutes.forEach(route => {
-                        const newMetric = route.metric + 1;
-                        const existingRouteIndex = newTable.findIndex(r => r.destination === route.destination);
-
-                        const link = INITIAL_LINKS.find(l => 
-                            (l.sourceId === targetRouter.id && l.targetId === sourceRouter.id) || 
-                            (l.targetId === targetRouter.id && l.sourceId === sourceRouter.id)
-                        );
-                        
-                        // Interface Determination Logic (Simulated for visual correctness)
-                        let ingressInterfaceName = "Serial?";
-                        if (link) {
-                           const myInterface = targetRouter.interfaces.find(i => i.subnet === link.network.split('/')[0]);
-                           if(myInterface) ingressInterfaceName = myInterface.name;
-                           else {
-                               // Hardcoded fallbacks for the specific topology if subnet matching fails for any reason
-                               if(targetRouter.id === 'R2' && sourceRouter.id === 'R1') ingressInterfaceName = 'Se0/0/0';
-                               if(targetRouter.id === 'R2' && sourceRouter.id === 'R3') ingressInterfaceName = 'Se0/0/1';
-                               if(targetRouter.id === 'R1') ingressInterfaceName = 'Se0/0/0';
-                               if(targetRouter.id === 'R3') ingressInterfaceName = 'Se0/0/1';
-                           }
-                        }
-
-                        let nextHopIp = "0.0.0.0";
-                        if (link) {
-                             const sourceInt = sourceRouter.interfaces.find(i => 
-                                (i.subnet === '10.0.0.0' && link.network.startsWith('10.0.0.0')) ||
-                                (i.subnet === '10.0.0.4' && link.network.startsWith('10.0.0.4'))
-                             );
-                             if (sourceInt) nextHopIp = sourceInt.ip;
-                        }
-
-                        if (existingRouteIndex === -1) {
-                            newTable.push({
-                                destination: route.destination,
-                                mask: route.mask,
-                                gateway: nextHopIp,
-                                interface: ingressInterfaceName,
-                                metric: newMetric,
-                                source: 'R'
-                            });
-                            updated = true;
-                            addLog(`${targetRouter.name} learned ${route.destination}`);
-                        } else {
-                            // Distance Vector Logic: Update if metric is lower, or if the update comes from the current next-hop (not implemented here for simplicity, focusing on cost)
-                            if (newMetric < newTable[existingRouteIndex].metric) {
-                                newTable[existingRouteIndex] = {
-                                    ...newTable[existingRouteIndex],
-                                    metric: newMetric,
-                                    gateway: nextHopIp,
-                                    interface: ingressInterfaceName,
-                                    source: 'R'
-                                };
-                                updated = true;
-                                addLog(`${targetRouter.name} updated ${route.destination}`);
-                            }
-                        }
-                    });
-
-                    if (updated) {
-                        return currentRouters.map(r => r.id === targetRouter.id ? { ...r, routingTable: newTable } : r);
-                    }
-                    return currentRouters;
-                });
-            };
+                raf = requestAnimationFrame(tick);
+                return () => cancelAnimationFrame(raf);
+            }, [isAnimating]);
 
             const startAdvertisementStep = () => {
                 if (isAnimating) return;
+                const round = step + 1;
+                const result = computeRound(routers);
+                pendingRef.current = { ...result, round };
+                setPackets(result.packets);
+                setProgress(0);
+                setStep(round);
                 setIsAnimating(true);
-                setStep(prev => prev + 1);
-
-                const newPackets = [];
-
-                INITIAL_LINKS.forEach(link => {
-                    const r1 = routers.find(r => r.id === link.sourceId);
-                    const r2 = routers.find(r => r.id === link.targetId);
-
-                    if (r1 && r2) {
-                        // Packet from R1 to R2
-                        newPackets.push({
-                            id: `p-${Date.now()}-${r1.id}-${r2.id}`,
-                            sourceId: r1.id,
-                            targetId: r2.id,
-                            progress: 0,
-                            message: JSON.stringify(r1.routingTable),
-                            color: '#3B82F6'
-                        });
-
-                        // Packet from R2 to R1
-                        newPackets.push({
-                            id: `p-${Date.now()}-${r2.id}-${r1.id}`,
-                            sourceId: r2.id,
-                            targetId: r1.id,
-                            progress: 0,
-                            message: JSON.stringify(r2.routingTable),
-                            color: '#3B82F6'
-                        });
-                    }
-                });
-
-                addLog(`Exchange Round ${step + 1} started`);
-                setPackets(newPackets);
+                setStatus({ text: `Round ${round}: routers are exchanging RIPv2 updates...`, converged: false });
+                addLogs([`Exchange round ${round} started`]);
             };
 
-            // --- Render Helpers ---
+            const selectedRouter = getRouterById(routers, selectedRouterId);
+            const recentKeys = recent[selectedRouterId] || [];
 
-            const getRouterPosition = (id) => {
-                const r = routers.find((n) => n.id === id);
-                return r ? { x: r.x, y: r.y } : { x: 0, y: 0 };
-            };
-
-            const selectedRouter = routers.find(r => r.id === selectedRouterId);
+            const codeStyle = (code) =>
+                code === 'C' ? 'bg-green-100 text-green-700'
+                : code === 'L' ? 'bg-violet-100 text-violet-700'
+                : 'bg-orange-100 text-orange-700';
 
             return (
                 <div className="flex flex-col h-full w-full bg-slate-50 text-slate-900 font-sans overflow-hidden select-none">
@@ -329,135 +438,162 @@
                                 <IconShare2 className="w-6 h-6 text-blue-400" />
                                 Routing Protocol Simulation
                             </h1>
+                            <p className="text-xs text-slate-400 mt-0.5 ml-8">RIPv2 distance vector, hop count metric, split horizon</p>
                         </div>
                         <div className="flex gap-2">
-                            <button 
+                            <button
                                 onClick={resetSimulation}
                                 className="flex items-center gap-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm transition-colors"
                             >
                                 <IconRotateCcw className="w-3 h-3" /> Reset
                             </button>
-                            <button 
+                            <button
                                 onClick={startAdvertisementStep}
                                 disabled={isAnimating}
                                 className={`flex items-center gap-2 px-4 py-1 rounded text-sm font-semibold transition-all ${
-                                    isAnimating 
-                                    ? 'bg-slate-600 cursor-not-allowed text-slate-400' 
+                                    isAnimating
+                                    ? 'bg-slate-600 cursor-not-allowed text-slate-400'
                                     : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg hover:shadow-blue-500/25'
                                 }`}
                             >
-                                <IconPlay className="w-3 h-3 fill-current" /> 
-                                {step === 0 ? "Step 1: Advertise" : "Next Step"}
+                                <IconPlay className="w-3 h-3 fill-current" />
+                                {step === 0 ? 'Step 1: Advertise' : 'Next Step'}
                             </button>
                         </div>
                     </header>
 
                     <div className="flex flex-1 overflow-hidden">
-                        
+
                         {/* Main Canvas Area */}
-                        <main className="flex-1 relative bg-slate-100 overflow-hidden cursor-default">
-                            
-                            {/* How it works Box */}
-                            <div className="absolute bottom-4 right-4 z-0 bg-white/80 backdrop-blur p-2 rounded shadow-sm border border-slate-200 max-w-xs no-select">
-                                <h3 className="font-semibold text-slate-700 flex items-center gap-2 mb-1 text-sm">
-                                    <IconInfo className="w-3 h-3" /> How it works
-                                </h3>
-                                <p className="text-xs text-slate-600 leading-tight">
-                                    1. <strong>Directly Connected:</strong> Routers start knowing only local interfaces.
-                                    <br/>
-                                    2. <strong>Advertise:</strong> Click "Step" to exchange routing tables.
-                                    <br/>
-                                    3. <strong>Convergence:</strong> Keep stepping until tables stabilise.
-                                </p>
+                        <main className="flex-1 flex flex-col bg-slate-100 overflow-hidden cursor-default">
+
+                            {/* Round status */}
+                            <div className="shrink-0 px-3 pt-3">
+                                <div className={`inline-block px-3 py-1.5 rounded shadow-sm border text-xs no-select ${
+                                    status.converged ? 'bg-green-50 border-green-200 text-green-800' : 'bg-white/90 border-slate-200 text-slate-600'
+                                }`}>
+                                    <span className="font-bold mr-2">Round {step}</span>{status.text}
+                                </div>
                             </div>
 
-                            <svg className="w-full h-full pointer-events-none">
-                                <defs>
-                                    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="28" refY="3.5" orient="auto">
-                                        <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
-                                    </marker>
-                                </defs>
+                            {/* Topology: fills the space between the status bar and the How it works panel */}
+                            <div className="flex-1 min-h-0 relative">
+                            {/* Zoom controls */}
+                            <div className="absolute top-2 right-3 z-10 flex items-center bg-white/90 border border-slate-200 rounded shadow-sm text-slate-600 no-select">
+                                <button onClick={() => changeZoom(-ZOOM_STEP)} disabled={zoom <= ZOOM_MIN} title="Zoom out" className="w-7 h-7 text-lg leading-none hover:bg-slate-100 disabled:text-slate-300 rounded-l">&minus;</button>
+                                <button onClick={resetZoom} title="Reset zoom" className="px-1.5 h-7 text-[11px] font-mono border-x border-slate-200 hover:bg-slate-100 min-w-[3rem]">{Math.round(zoom * 100)}%</button>
+                                <button onClick={() => changeZoom(ZOOM_STEP)} disabled={zoom >= ZOOM_MAX} title="Zoom in" className="w-7 h-7 text-lg leading-none hover:bg-slate-100 disabled:text-slate-300 rounded-r">+</button>
+                            </div>
+                            <svg
+                                ref={svgRef}
+                                className={`absolute inset-0 w-full h-full ${dragRef.current ? 'cursor-grabbing' : 'cursor-grab'}`}
+                                viewBox={viewBox}
+                                preserveAspectRatio="xMidYMid meet"
+                                onMouseDown={onPanStart}
+                                onMouseMove={onPanMove}
+                                onMouseUp={onPanEnd}
+                                onMouseLeave={onPanEnd}
+                            >
+                                {/* LANs as bus networks */}
+                                {LANS.map((lan) => (
+                                    <LanBus key={lan.id} lan={lan} router={getRouterById(routers, lan.router)} />
+                                ))}
 
-                                {/* Links */}
-                                {INITIAL_LINKS.map(link => {
-                                    const start = getRouterPosition(link.sourceId);
-                                    const end = getRouterPosition(link.targetId);
-                                    
-                                    // Offset logic: Move the specific label for 10.0.0.4 to avoid overlapping the diagonal link
-                                    const isDiagonal = link.network.includes('10.0.0.4');
-                                    const labelX = (start.x + end.x) / 2 + (isDiagonal ? 25 : 0);
-                                    const labelY = (start.y + end.y) / 2 + (isDiagonal ? -5 : -10);
+                                {/* Serial links */}
+                                {LINKS.map((link) => {
+                                    const ra = getRouterById(routers, link.a);
+                                    const rb = getRouterById(routers, link.b);
+                                    const ia = getIface(ra, link.aIf);
+                                    const ib = getIface(rb, link.bIf);
+                                    const prefix = maskToPrefix(ia.mask);
+                                    const net = networkOf(ia.ip, prefix);
+                                    const dx = rb.x - ra.x, dy = rb.y - ra.y;
+                                    const len = Math.hypot(dx, dy);
+                                    const nx = -dy / len, ny = dx / len;
+                                    const mx = (ra.x + rb.x) / 2, my = (ra.y + rb.y) / 2;
+                                    const at = (t, off) => ({ x: ra.x + dx * t + nx * off, y: ra.y + dy * t + ny * off });
+                                    const la = at(0.24, 14), lb = at(0.76, 14);
 
                                     return (
                                         <g key={link.id}>
-                                            <line 
-                                                x1={start.x} y1={start.y} 
-                                                x2={end.x} y2={end.y} 
-                                                stroke="#94a3b8" 
-                                                strokeWidth="4" 
-                                            />
-                                            <text 
-                                                x={labelX} 
-                                                y={labelY} 
-                                                textAnchor="middle" 
-                                                className="fill-slate-500 text-xs font-mono bg-white"
-                                            >
-                                                {link.network}
+                                            <line x1={ra.x} y1={ra.y} x2={rb.x} y2={rb.y} stroke="#94a3b8" strokeWidth="4" />
+                                            <text x={mx - nx * 14} y={my - ny * 14 + 4} textAnchor="middle" className="halo" fontSize="11" fontFamily="monospace" fontWeight="600" fill="#64748b">
+                                                {net}/{prefix}
+                                            </text>
+                                            <text x={la.x} y={la.y + 3} textAnchor="middle" className="halo" fontSize="9" fontFamily="monospace" fill="#475569">
+                                                {ia.name} .{lastOctet(ia.ip)}
+                                            </text>
+                                            <text x={lb.x} y={lb.y + 3} textAnchor="middle" className="halo" fontSize="9" fontFamily="monospace" fill="#475569">
+                                                {ib.name} .{lastOctet(ib.ip)}
                                             </text>
                                         </g>
                                     );
                                 })}
 
-                                {/* Visual Clouds (Subnets) */}
-                                <g transform="translate(150, 140)"> {/* R1 area */}
-                                    <line x1="0" y1="-60" x2="0" y2="-20" stroke="#cbd5e1" strokeWidth="2" strokeDasharray="4" />
-                                    <ellipse cx="0" cy="0" rx="40" ry="25" fill="#e2e8f0" />
-                                    <text x="0" y="5" textAnchor="middle" className="text-xs fill-slate-500">192.168.1.0/24</text>
-                                </g>
-                                <g transform="translate(450, 20)"> {/* R2 area */}
-                                    <line x1="0" y1="60" x2="0" y2="20" stroke="#cbd5e1" strokeWidth="2" strokeDasharray="4" />
-                                    <ellipse cx="0" cy="0" rx="40" ry="25" fill="#e2e8f0" />
-                                    <text x="0" y="5" textAnchor="middle" className="text-xs fill-slate-500">172.16.1.0/24</text>
-                                </g>
-                                <g transform="translate(300, 320)"> {/* R3 area */}
-                                    <line x1="0" y1="-60" x2="0" y2="-20" stroke="#cbd5e1" strokeWidth="2" strokeDasharray="4" />
-                                    <ellipse cx="0" cy="0" rx="40" ry="25" fill="#e2e8f0" />
-                                    <text x="0" y="5" textAnchor="middle" className="text-xs fill-slate-500">192.168.2.0/24</text>
-                                </g>
-
-                                {/* Packets */}
-                                {packets.map(p => {
-                                    const start = getRouterPosition(p.sourceId);
-                                    const end = getRouterPosition(p.targetId);
-                                    const currentX = start.x + (end.x - start.x) * p.progress;
-                                    const currentY = start.y + (end.y - start.y) * p.progress;
-
+                                {/* Packets (RIP updates, number = routes carried) */}
+                                {packets.map((p) => {
+                                    const link = LINKS.find((l) => l.id === p.linkId);
+                                    const ra = getRouterById(routers, link.a);
+                                    const rb = getRouterById(routers, link.b);
+                                    const start = getRouterById(routers, p.sourceId);
+                                    const end = getRouterById(routers, p.targetId);
+                                    const dx = rb.x - ra.x, dy = rb.y - ra.y;
+                                    const len = Math.hypot(dx, dy);
+                                    const off = 7 * p.dir;
+                                    const x = start.x + (end.x - start.x) * progress + (-dy / len) * off;
+                                    const y = start.y + (end.y - start.y) * progress + (dx / len) * off;
                                     return (
                                         <g key={p.id}>
-                                            <circle cx={currentX} cy={currentY} r="6" fill={p.color} className="animate-pulse shadow-lg" />
+                                            <circle cx={x} cy={y} r="8" fill="#3B82F6" className="animate-pulse" />
+                                            <text x={x} y={y + 3} textAnchor="middle" fontSize="9" fontWeight="700" fill="#ffffff">{p.count}</text>
+                                        </g>
+                                    );
+                                })}
+
+                                {/* Router Nodes */}
+                                {routers.map((router) => {
+                                    const sel = selectedRouterId === router.id;
+                                    return (
+                                        <g
+                                            key={router.id}
+                                            transform={`translate(${router.x} ${router.y}) scale(${sel ? 1.1 : 1})`}
+                                            onClick={() => selectRouter(router.id)}
+                                            className={`cursor-pointer ${sel ? '' : 'router-hover'}`}
+                                            style={sel ? { filter: 'drop-shadow(0 6px 8px rgba(15,23,42,0.18))' } : undefined}
+                                        >
+                                            <circle r="28" fill={sel ? '#ffffff' : '#f1f5f9'} stroke={sel ? '#3b82f6' : '#cbd5e1'} strokeWidth="4" className="router-ring" />
+                                            <g transform="translate(-9 -18) scale(0.75)" fill="none" stroke={sel ? '#2563eb' : '#64748b'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+                                                <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+                                                <line x1="6" y1="6" x2="6.01" y2="6" />
+                                                <line x1="6" y1="18" x2="6.01" y2="18" />
+                                            </g>
+                                            <text y="17" textAnchor="middle" fontSize="11" fontWeight="700" fill="#334155">{router.id}</text>
                                         </g>
                                     );
                                 })}
                             </svg>
+                            </div>
 
-                            {/* Router Nodes */}
-                            {routers.map(router => (
-                                <div 
-                                    key={router.id}
-                                    onClick={() => setSelectedRouterId(router.id)}
-                                    className={`absolute w-14 h-14 rounded-full flex items-center justify-center transform -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-all duration-300 pointer-events-auto border-4 ${selectedRouterId === router.id ? 'border-blue-500 shadow-xl scale-110 bg-white' : 'border-slate-300 bg-slate-100 hover:border-blue-300'}`}
-                                    style={{ left: router.x, top: router.y }}
-                                >
-                                    <div className="flex flex-col items-center pointer-events-none">
-                                        <IconServer className={`w-5 h-5 ${selectedRouterId === router.id ? 'text-blue-600' : 'text-slate-500'}`} />
-                                        <span className="text-xs font-bold mt-1 text-slate-700">{router.id}</span>
-                                    </div>
+                            {/* How it works: sits below the topology so it never covers it */}
+                            <div className="shrink-0 flex justify-end px-4 pb-4 pt-2">
+                                <div className="bg-white/80 backdrop-blur p-2 rounded shadow-sm border border-slate-200 max-w-2xl no-select">
+                                    <h3 className="font-semibold text-slate-700 flex items-center gap-2 mb-1 text-sm">
+                                        <IconInfo className="w-3 h-3" /> How it works
+                                    </h3>
+                                    <p className="text-xs text-slate-600 leading-tight">
+                                        1. <strong>Directly Connected:</strong> Each interface adds a connected (C) network route and a local (L) /32 route for its own address.
+                                        <br/>
+                                        2. <strong>Advertise:</strong> Click "Step" to send RIPv2 updates. Each hop adds 1 to the metric and routes are not sent back out the interface they were learned on.
+                                        <br/>
+                                        3. <strong>Convergence:</strong> Keep stepping until a round changes no tables.
+                                    </p>
                                 </div>
-                            ))}
+                            </div>
                         </main>
 
                         {/* Sidebar */}
-                        <aside className="w-80 bg-white border-l border-slate-200 flex flex-col shadow-lg z-20">
+                        <aside className="w-[22rem] bg-white border-l border-slate-200 flex flex-col shadow-lg z-20">
                             {/* Router Details */}
                             <div className="p-3 border-b border-slate-100 bg-slate-50">
                                 <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
@@ -465,10 +601,11 @@
                                     {selectedRouter?.name}
                                 </h2>
                                 <div className="mt-2 text-xs text-slate-500 space-y-1">
-                                    {selectedRouter?.interfaces.map(int => (
-                                        <div key={int.id} className="flex justify-between font-mono bg-white px-2 py-1 rounded border border-slate-200">
-                                            <span>{int.name}</span>
-                                            <span className="text-slate-700">{int.ip}</span>
+                                    {selectedRouter?.interfaces.map((int) => (
+                                        <div key={int.id} className="flex items-center justify-between font-mono bg-white px-2 py-1 rounded border border-slate-200">
+                                            <span className="w-16">{int.name}</span>
+                                            <span className="text-slate-700 flex-1">{int.ip}/{maskToPrefix(int.mask)}</span>
+                                            <span className={`text-[10px] font-bold px-1.5 rounded ${int.role === 'LAN' ? 'bg-sky-100 text-sky-700' : 'bg-slate-200 text-slate-600'}`}>{int.role}</span>
                                         </div>
                                     ))}
                                 </div>
@@ -477,41 +614,61 @@
                             {/* Routing Table */}
                             <div className="flex-1 overflow-hidden flex flex-col">
                                 <div className="p-2 bg-slate-100 border-b border-slate-200 flex justify-between items-center">
-                                    <h3 className="font-semibold text-slate-700 text-sm">Routing Table</h3>
+                                    <div className="flex gap-1">
+                                        <button
+                                            onClick={() => setView('table')}
+                                            className={`text-sm font-semibold px-2 py-0.5 rounded ${view === 'table' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                        >Routing Table</button>
+                                        <button
+                                            onClick={() => setView('cli')}
+                                            className={`text-sm font-semibold px-2 py-0.5 rounded font-mono ${view === 'cli' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                        >show ip route</button>
+                                    </div>
                                     <span className="text-xs uppercase font-bold tracking-wider text-slate-400 bg-slate-200 px-2 py-0.5 rounded">IPv4</span>
                                 </div>
-                                
-                                <div className="overflow-auto flex-1 p-0">
-                                    <table className="w-full text-left text-xs border-collapse">
-                                        <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200 sticky top-0">
-                                            <tr>
-                                                <th className="p-2">Code</th>
-                                                <th className="p-2">Network</th>
-                                                <th className="p-2">Next Hop</th>
-                                                <th className="p-2">Metric</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="font-mono text-slate-700">
-                                            {selectedRouter?.routingTable.sort((a,b) => a.destination.localeCompare(b.destination)).map((route, i) => (
-                                                <tr key={i} className="border-b border-slate-100 hover:bg-blue-50 transition-colors">
-                                                    <td className="p-2">
-                                                        <span className={`inline-block w-4 h-4 text-center rounded text-[10px] leading-4 font-bold ${route.source === 'C' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
-                                                            {route.source}
-                                                        </span>
-                                                    </td>
-                                                    <td className="p-2 font-semibold">{route.destination}</td>
-                                                    <td className="p-2 text-slate-500">{route.gateway === '0.0.0.0' ? 'Direct' : route.gateway}</td>
-                                                    <td className="p-2 text-center text-slate-400">{route.metric}</td>
-                                                </tr>
-                                            ))}
-                                            {selectedRouter?.routingTable.length === 0 && (
+
+                                {view === 'table' ? (
+                                    <div className="overflow-auto flex-1 p-0">
+                                        <table className="w-full text-left text-xs border-collapse">
+                                            <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200 sticky top-0">
                                                 <tr>
-                                                    <td colSpan={4} className="p-4 text-center text-slate-400 italic">No routes present</td>
+                                                    <th className="px-1.5 py-2">Code</th>
+                                                    <th className="px-1.5 py-2">Network</th>
+                                                    <th className="px-1.5 py-2">Next Hop</th>
+                                                    <th className="px-1.5 py-2">Interface</th>
+                                                    <th className="px-1.5 py-2 text-center">AD/Met</th>
                                                 </tr>
-                                            )}
-                                        </tbody>
-                                    </table>
-                                </div>
+                                            </thead>
+                                            <tbody className="font-mono text-slate-700">
+                                                {selectedRouter?.routingTable.map((route) => {
+                                                    const isNew = recentKeys.includes(routeKey(route));
+                                                    return (
+                                                        <tr key={routeKey(route)} className={`border-b border-slate-100 hover:bg-blue-50 transition-colors ${isNew ? 'bg-amber-50' : ''}`}>
+                                                            <td className="px-1.5 py-2">
+                                                                <span className={`inline-block w-4 h-4 text-center rounded text-[10px] leading-4 font-bold ${codeStyle(route.code)}`}>
+                                                                    {route.code}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-1.5 py-2 font-semibold whitespace-nowrap">{route.network}/{route.prefix}</td>
+                                                            <td className="px-1.5 py-2 text-slate-500 whitespace-nowrap">{route.nextHop ? route.nextHop : <span className="italic text-slate-400">connected</span>}</td>
+                                                            <td className="px-1.5 py-2 text-slate-500">{route.iface}</td>
+                                                            <td className="px-1.5 py-2 text-center text-slate-400">[{route.ad}/{route.metric}]</td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                                {selectedRouter?.routingTable.length === 0 && (
+                                                    <tr>
+                                                        <td colSpan={5} className="p-4 text-center text-slate-400 italic">No routes present</td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                ) : (
+                                    <div className="overflow-auto flex-1 bg-slate-900">
+                                        <pre className="p-3 text-[11px] leading-snug text-green-300 font-mono whitespace-pre select-text">{selectedRouter ? showIpRoute(selectedRouter) : ''}</pre>
+                                    </div>
+                                )}
                             </div>
                         </aside>
 
